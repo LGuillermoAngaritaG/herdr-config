@@ -1,0 +1,23 @@
+# Only what you own is synced. Herdr's shipped files and each machine's own state stay out.
+/*
+!/.gitignore
+!/README.md
+!/sync.sh
+!/install.sh
+!/keys.json
+!/settings.json
+!/programs.json
+!/themes/
+!/layouts/
+/layouts/main.json
+/layouts/terminals.json
+/layouts/win98.json
+/layouts/win98.svg
+!/mods/
+/mods/*
+!/mods/limits/
+!/mods/orchestra/
+# Written by Herdr into each mod.
+*.d.ts
+jsconfig.json
+.state/
