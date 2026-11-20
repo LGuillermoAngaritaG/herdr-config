@@ -33,7 +33,9 @@ const MAX_PARALLEL = 3;
 // Codex's read-only sandbox also blocks hc, so Codex and Antigravity are held back by the brief only.
 function argv(pick, role) {
   if (pick.agent === "claude") {
-    const lock = role === "orchestrator" ? ["--permission-mode", "manual", "--tools", "Bash", "--allowedTools", "Bash(hc *)", "Bash(git worktree *)", "Bash(git -C * worktree *)"] : [];
+    const lock = role === "orchestrator" ? ["--permission-mode", "manual", "--tools", "Bash", "--allowedTools", "Bash(hc *)", "Bash(git worktree *)", "Bash(git -C * worktree *)", "Bash(printenv HC_TERMINAL_ID)",
+      // hc exec and hc file run any command or edit any file: they would go around the lock.
+      "--disallowedTools", "Bash(hc exec *)", "Bash(hc file *)"] : [];
     return ["claude", "--model", pick.model, "--effort", pick.effort, ...lock];
   }
   if (pick.agent === "codex") return ["codex", "--no-daemon", "-m", pick.model, "-c", `model_reasoning_effort="${pick.effort}"`];
@@ -69,7 +71,7 @@ Hard rules:
 - The only commands you run are hc commands and git worktree commands. If you catch yourself about to do a task, stop and give it to a worker.
 - Do not use your own built-in subagents or tools to do work. Use only the helpers below, started with hc.
 
-First run: hc label "$HC_TERMINAL_ID" ${ROLE_LABEL}=orchestrator   then: echo $HC_TERMINAL_ID   (that is your address).
+First run these two commands, one at a time: printenv HC_TERMINAL_ID   (that is your address), then: hc label <your address> ${ROLE_LABEL}=orchestrator
 
 Helpers (always --bg, a short unique --name, and your address so they can report back):
 - worker (${describe(picks.worker)}): hc run --bg --rm --name w-<short> --cwd <folder> worker "<task brief>"
@@ -83,7 +85,7 @@ Every task brief has these parts, each on its own line:
   Read first: <files or docs to read before starting>
   Do not: <what is out of scope>
   Port: <a free port number only for this worker, if it may start a server>
-  Report: what you did, files changed, tests run and their result, anything unfinished.
+  Report: send it with hc send <orchestrator address> "<report>": what you did, files changed, tests run and their result, anything unfinished.
   Orchestrator address: <your address>
 
 How many workers (match the effort to the goal, do not over-staff):
