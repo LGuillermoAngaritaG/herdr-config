@@ -4,6 +4,8 @@
 set -eu
 REPO="${1:-https://github.com/LGuillermoAngaritaG/herdr-config.git}"
 DIR="$HOME/.config/herdr-app"
+# Lets git use your GitHub login for the private repo.
+command -v gh >/dev/null && gh auth setup-git
 mkdir -p "$DIR"
 cd "$DIR"
 if [ ! -d .git ]; then
