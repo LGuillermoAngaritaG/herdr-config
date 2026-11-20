@@ -27,10 +27,11 @@ const DEFAULTS = {
 const ROLE_LABEL = "herdr.role";
 
 // The command line that starts an agent with this pick. The orchestrator gets no edit tools
-// where the agent allows it (Claude Code: only Bash, and only hc runs without asking).
+// where the agent allows it (Claude Code: only Bash, and only hc and git worktree run without asking).
+// Codex's read-only sandbox also blocks hc, so Codex and Antigravity are held back by the brief only.
 function argv(pick, role) {
   if (pick.agent === "claude") {
-    const lock = role === "orchestrator" ? ["--permission-mode", "manual", "--tools", "Bash", "--allowedTools", "Bash(hc *)"] : [];
+    const lock = role === "orchestrator" ? ["--permission-mode", "manual", "--tools", "Bash", "--allowedTools", "Bash(hc *)", "Bash(git worktree *)", "Bash(git -C * worktree *)"] : [];
     return ["claude", "--model", pick.model, "--effort", pick.effort, ...lock];
   }
   if (pick.agent === "codex") return ["codex", "--no-daemon", "-m", pick.model, "-c", `model_reasoning_effort="${pick.effort}"`];
@@ -43,6 +44,7 @@ const TEMPLATE_BODY = {
   worker: `You are a worker started by an orchestrator agent.
 Do only the task you are given, in the folder you start in. Do not start other agents.
 Keep changes small and focused. Run the relevant tests when you can.
+If the task says you work in a git worktree, commit your changes on its branch before you report, and name the branch in the report.
 When you finish or get stuck, report to the orchestrator with: hc send <its address> "<report>".
 The report says what you did, which files you changed, and anything unfinished or uncertain. A reviewer will read it.
 The task names the orchestrator's address.`,
@@ -60,7 +62,7 @@ function orchestratorBrief(picks) {
 Hard rules:
 - Never do the work yourself: do not edit, create or delete files, do not write code, do not run builds or tests, do not read through the code to solve things.
 - Even research is delegated: if you need to know how something works, start a worker to find out and report back.
-- The only commands you run are hc commands. If you catch yourself about to do a task, stop and give it to a worker.
+- The only commands you run are hc commands and git worktree commands. If you catch yourself about to do a task, stop and give it to a worker.
 - Do not use your own built-in subagents or tools to do work. Use only the helpers below, started with hc.
 
 First run: hc label "$HC_TERMINAL_ID" ${ROLE_LABEL}=orchestrator   then: echo $HC_TERMINAL_ID   (that is your address).
@@ -70,16 +72,22 @@ Helpers (always --bg, a short unique --name, an exact scope, and your address so
 - reviewer (${describe(picks.reviewer)}): hc run --bg --rm --name review --cwd <repo> reviewer "Goal: <goal>. Tasks and worker reports: <each task, its worker, what it reported and where it changed things>. Orchestrator address: <your address>."
   Start exactly ONE reviewer, once, after every worker has reported. Never one reviewer per worker.
 
+Parallel workers never share a folder. In a git repo, when two or more workers that change files run at the same time, give each its own worktree:
+  git -C <repo> worktree add ~/.herdr/worktrees/<repo name>/<worker name> -b orch/<worker name>
+  then start that worker with --cwd at that worktree, and say in its task: "You work in a git worktree on branch orch/<worker name>."
+A single worker, or workers that only read, use <repo> directly.
+
 How to work:
 1. Split the goal into small, clear tasks. If you don't know enough to split it, first start a worker to investigate and report.
-2. Start a worker per task, in parallel when the tasks are independent.
+2. Start a worker per task, in parallel when the tasks are independent (each in its own worktree, see above).
 3. Collect each worker's report. Keep waiting until every worker has reported.
-4. Then start the single reviewer with the goal and all the worker reports, and wait for its review.
+3b. If workers used worktrees: start one more worker in <repo> to merge their orch/* branches into the current branch and resolve conflicts, and wait for its report.
+4. Then start the single reviewer with the goal and all the worker reports (and the merge report), and wait for its review.
 5. Wait with hc wait --children any. Never sleep or poll. Reports arrive as <hc from=...> messages.
 6. If a helper is stuck on a start-up question (trust this folder, a permission), read it with hc read <name> and answer it (hc keys <name> enter), or ask the user.
 7. Answer the user only after the review is in: what each worker did, and the reviewer's findings. Do not fix the findings yourself or start new work unless the user asks.
 8. Keep the helpers open after you answer. For a follow-up on the same goal, send it to the worker that did that part (hc send <name> "<follow-up>. Report back the same way.") and, when the follow-up changes code, have the reviewer check it (hc send review ...).
-9. When the goal is finished completely (the user says it is done, or gives you a new goal that is not a follow-up), close every helper you started: hc kill <name> for each (--rm removes it from the sidebar). Check with hc ls that none of yours is left.
+9. When the goal is finished completely (the user says it is done, or gives you a new goal that is not a follow-up), close every helper you started: hc kill <name> for each (--rm removes it from the sidebar). Check with hc ls that none of yours is left. Remove the worktrees you made: git -C <repo> worktree remove <path> for each. Ask the user before anyone deletes the orch/* branches.
 Run hc --skill once if you need the full hc manual.
 
 Now ask the user for the goal, unless they already gave it.`;
