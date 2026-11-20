@@ -4,7 +4,7 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, hc, home, appHome, readTextFile, writeTextFile, theme, run, shared, setShared, terminals, spaces, checking } from "herdr";
+import { exec, hc, home, appHome, readTextFile, writeTextFile, theme, run, shared, setShared, terminals, agents, spaces, checking } from "herdr";
 
 const AGENTS = [
   { id: "claude", label: "Claude Code" },
@@ -46,6 +46,8 @@ const TEMPLATE_BODY = {
   worker: `You are a worker started by an orchestrator agent.
 Do only the task you are given, in the folder you start in. Do not start other agents.
 Keep changes small and focused. Run the relevant tests when you can.
+Change only the files the task says you own. If you need to change another file, ask the orchestrator first.
+If the task gives you a port, use only that port for servers you start.
 If the task says you work in a git worktree, commit your changes on its branch before you report, and name the branch in the report.
 When you finish or get stuck, report to the orchestrator with: hc send <its address> "<report>".
 The report says what you did, which files you changed, and anything unfinished or uncertain. A reviewer will read it.
@@ -247,13 +249,24 @@ export default class Orchestra extends View {
     return div().size(7).flex_none().rounded(4).bg(color);
   }
 
+  // The tab name when a person named the tab (not a number, not the program name), else the
+  // terminal title, else the address: what tells two agents of the same program apart.
+  agentName(a) {
+    const info = this.agentInfo?.get(a.address);
+    const tab = info?.tab_name?.trim();
+    if (tab && !/^\d+$/.test(tab) && tab !== a.program?.name) return tab;
+    return info?.title?.trim() || a.address;
+  }
+
   agentRow(t, a, spaceName) {
     const on = a.labels?.[ROLE_LABEL] === "orchestrator";
     return h_flex().id(`orch-${a.address}`).px(8).h(30).gap(8).items_center().rounded(6).hover((s) => s.bg(t.hover))
       .child(this.dot(t, a.status))
       .child(div().id(`focus-${a.address}`).flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).cursor_pointer()
-        .tooltip("Show this agent").on_click(() => run("agent.focus", { terminal: a.address }))
-        .child(`${a.program?.name ?? a.address}${spaceName ? ` · ${spaceName}` : ""}`))
+        .tooltip(`Show this agent (${a.address})`).on_click(() => run("agent.focus", { terminal: a.address }))
+        .child(this.agentName(a)))
+      .child(div().flex_none().max_w(110).truncate().text_size(10.5).text_color(t.dim)
+        .child(`${a.program?.name ?? ""}${spaceName ? ` · ${spaceName}` : ""}`))
       .child(div().id(`switch-${a.address}`).w(30).h(16).rounded(8).p(2).flex().bg(on ? t.accent : t.border)
         .when(on, (el) => el.justify_end())
         .tooltip(on ? "Stop being the orchestrator" : "Make this agent the orchestrator (held back by its instructions only: it keeps its edit tools)")
@@ -275,15 +288,25 @@ export default class Orchestra extends View {
     const t = theme();
     const picks = this.picks();
     const all = terminals();
+    this.agentInfo = new Map(agents().map((x) => [x.address, x]));
     const live = all.filter((x) => x.state === "live" && x.program?.agent && !x.parent);
     const spaceOf = new Map(spaces().map((s) => [s.id, s.name]));
     const helpers = (a) => all.filter((x) => x.state === "live" && x.parent === a.address);
     const head = (s) => div().pt(4).text_size(11.5).font_medium().text_color(t.dim).child(s);
+    // Orchestrators and their helpers that wait for the person; a click shows the first one.
+    const orchs = live.filter((a) => a.labels?.[ROLE_LABEL] === "orchestrator");
+    const blocked = [...orchs, ...orchs.flatMap(helpers)].filter((x) => x.status === "blocked");
     return v_flex().id("orchestra").size_full().min_h(0).bg(t.surface)
       // Pinned: the main action never scrolls away.
       .child(v_flex().flex_none().px(12).pt(12).pb(10).gap(8).border_b(1).border_color(t.border)
         .child(h_flex().justify_between().items_center()
-          .child(div().text_size(14).font_semibold().text_color(t.foreground).child("Orchestra"))
+          .child(h_flex().gap(8).items_center()
+            .child(div().text_size(14).font_semibold().text_color(t.foreground).child("Orchestra"))
+            .when(blocked.length > 0, (el) => el.child(div().id("need-you").px(7).py(1).rounded(5).text_size(11).font_semibold()
+              .bg(t.blocked + "26").text_color(t.blocked).cursor_pointer()
+              .tooltip(`Show ${blocked[0].name ?? blocked[0].address}`)
+              .on_click(() => run("agent.focus", { terminal: blocked[0].address }))
+              .child(`${blocked.length} need${blocked.length === 1 ? "s" : ""} you`))))
           .child(div().id("reload-models").text_size(11).text_color(t.dim).hover((s) => s.text_color(t.foreground))
             .tooltip("Read the model lists again").on_click((_e, cx) => this.loadCatalog(cx)).child("Reload models")))
         .child(div().id("start-orch").w_full().py(7).rounded(6).flex().justify_center().text_size(12.5).font_medium()
