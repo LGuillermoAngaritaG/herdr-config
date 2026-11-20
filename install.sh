@@ -15,6 +15,7 @@ if [ ! -d .git ]; then
   git reset -q origin/main
   BACKUP="$HOME/.config/herdr-app-before-sync"
   for f in $(git diff --name-only); do
+    [ -e "$f" ] || continue
     mkdir -p "$BACKUP/$(dirname "$f")"
     cp "$f" "$BACKUP/$f"
   done
