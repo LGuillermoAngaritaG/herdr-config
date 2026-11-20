@@ -192,53 +192,90 @@ export default class Orchestra extends View {
       .hover((s) => s.bg(t.hover)).on_click((_e, cx) => fn(o.id, cx)).child(o.label)));
   }
 
+  // One line per role; a click opens its chips. Only one role is open at a time.
   role(t, role, pick) {
+    const open = this.openRole === role.id;
     const models = this.modelsWithPick(pick);
     const efforts = models.find((m) => m.id === pick.model)?.efforts ?? [];
     const label = (s) => div().text_size(10.5).text_color(t.dim).child(s);
-    return v_flex().p(10).gap(6).rounded(8).bg(t.background).border(1).border_color(t.border)
-      .child(h_flex().justify_between().items_center()
-        .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(role.label))
-        .child(div().text_size(10.5).text_color(t.dim).child(role.about)))
-      .child(label("Agent"))
-      .child(this.chips(t, `${role.id}-agent`, AGENTS, pick.agent, (v, cx) => this.setPick(role.id, { agent: v }, cx)))
-      .child(label("Model"))
-      .child(models.length ? this.chips(t, `${role.id}-model`, models, pick.model, (v, cx) => this.setPick(role.id, { model: v }, cx))
-        : div().text_size(11).text_color(t.dim).child(this.catalog ? "No models found" : "Loading models..."))
-      .when(efforts.length > 0, (el) => el.child(label("Effort"))
-        .child(this.chips(t, `${role.id}-effort`, efforts.map((e) => ({ id: e, label: e })), pick.effort, (v, cx) => this.setPick(role.id, { effort: v }, cx))));
+    const promptOnly = role.id === "orchestrator" && pick.agent !== "claude";
+    return v_flex().gap(6).rounded(8).bg(t.background).border(1).border_color(open ? t.accent : t.border)
+      .child(h_flex().id(`role-${role.id}`).px(10).py(8).gap(8).items_center().rounded(8).cursor_pointer().hover((s) => s.bg(t.hover))
+        .tooltip(open ? "Close" : role.about)
+        .on_click((_e, cx) => { this.openRole = open ? null : role.id; cx.notify(); })
+        .child(div().w(82).flex_none().text_size(12.5).font_semibold().text_color(t.foreground).child(role.label))
+        .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted)
+          .child(`${AGENTS.find((a) => a.id === pick.agent)?.label} · ${models.find((m) => m.id === pick.model)?.label ?? pick.model}${pick.effort ? ` · ${pick.effort}` : ""}`))
+        .child(div().flex_none().text_size(10.5).text_color(t.dim).child(open ? "Close" : "Change")))
+      .when(promptOnly, (el) => el.child(div().px(10).pb(open ? 0 : 8).text_size(10.5).text_color(t.blocked)
+        .child("Only Claude Code is locked out of editing. This agent is held back by its instructions only.")))
+      .when(open, (el) => el.child(v_flex().px(10).pb(10).gap(6)
+        .child(div().text_size(10.5).text_color(t.dim).child(role.about))
+        .child(label("Agent"))
+        .child(this.chips(t, `${role.id}-agent`, AGENTS, pick.agent, (v, cx) => this.setPick(role.id, { agent: v }, cx)))
+        .child(label("Model"))
+        .child(models.length ? this.chips(t, `${role.id}-model`, models, pick.model, (v, cx) => this.setPick(role.id, { model: v }, cx))
+          : div().text_size(11).text_color(t.dim).child(this.catalog ? "No models found" : "Loading models..."))
+        .when(efforts.length > 0, (el) => el.child(label("Effort"))
+          .child(this.chips(t, `${role.id}-effort`, efforts.map((e) => ({ id: e, label: e })), pick.effort, (v, cx) => this.setPick(role.id, { effort: v }, cx))))));
+  }
+
+  dot(t, status) {
+    const color = { working: t.working, blocked: t.blocked, done: t.done, idle: t.idle }[status] ?? t.dim;
+    return div().size(7).flex_none().rounded(4).bg(color);
   }
 
   agentRow(t, a, spaceName) {
     const on = a.labels?.[ROLE_LABEL] === "orchestrator";
     return h_flex().id(`orch-${a.address}`).px(8).h(30).gap(8).items_center().rounded(6).hover((s) => s.bg(t.hover))
-      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(`${a.program?.name ?? a.address}${spaceName ? ` · ${spaceName}` : ""}`))
+      .child(this.dot(t, a.status))
+      .child(div().id(`focus-${a.address}`).flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).cursor_pointer()
+        .tooltip("Show this agent").on_click(() => run("agent.focus", { terminal: a.address }))
+        .child(`${a.program?.name ?? a.address}${spaceName ? ` · ${spaceName}` : ""}`))
       .child(div().id(`switch-${a.address}`).w(30).h(16).rounded(8).p(2).flex().bg(on ? t.accent : t.border)
         .when(on, (el) => el.justify_end())
-        .tooltip(on ? "Stop being the orchestrator" : "Make this agent the orchestrator")
+        .tooltip(on ? "Stop being the orchestrator" : "Make this agent the orchestrator (held back by its instructions only: it keeps its edit tools)")
         .on_click((_e, cx) => this.toggle(a, !on, cx))
         .child(div().size(12).rounded(6).bg(on ? t.accent_foreground : t.muted)));
+  }
+
+  // The helpers an orchestrator started, under it: status, name, role; a click shows the helper.
+  helperRow(t, h) {
+    return h_flex().id(`helper-${h.address}`).ml(14).pl(10).pr(8).h(26).gap(8).items_center().rounded(6)
+      .border_l(1).border_color(t.border).cursor_pointer().hover((s) => s.bg(t.hover))
+      .tooltip("Show this helper").on_click(() => run("agent.focus", { terminal: h.address }))
+      .child(this.dot(t, h.status))
+      .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.foreground).child(h.name ?? h.address))
+      .child(div().flex_none().text_size(10.5).text_color(t.dim).child(`${h.template ?? h.program?.name ?? ""} · ${h.status ?? h.state}`));
   }
 
   render() {
     const t = theme();
     const picks = this.picks();
-    const live = terminals().filter((x) => x.state === "live" && x.program?.agent && !x.parent);
+    const all = terminals();
+    const live = all.filter((x) => x.state === "live" && x.program?.agent && !x.parent);
     const spaceOf = new Map(spaces().map((s) => [s.id, s.name]));
-    const button = (id, label, fn) => div().id(id).px(10).py(5).rounded(6).text_size(12).bg(t.solid).text_color(t.solid_foreground)
-      .hover((s) => s.opacity(0.9)).on_click(fn).child(label);
-    return v_flex().id("orchestra").size_full().min_h(0).bg(t.surface).p(12).gap(10).overflow_y_scrollbar()
-      .child(h_flex().justify_between().items_center()
-        .child(div().text_size(14).font_semibold().text_color(t.foreground).child("Orchestra"))
-        .child(div().id("reload-models").text_size(11).text_color(t.dim).hover((s) => s.text_color(t.foreground))
-          .tooltip("Read the model lists again").on_click((_e, cx) => this.loadCatalog(cx)).child("Reload models")))
-      .when(Boolean(this.status), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.status)))
-      .children(ROLES.map((r) => this.role(t, r, picks[r.id])))
-      .child(h_flex().gap(8).items_center()
-        .child(button("start-orch", "Start orchestrator", () => this.startOrchestrator()))
-        .child(div().text_size(10.5).text_color(t.dim).child("in a new tab")))
-      .child(div().pt(4).text_size(11.5).font_medium().text_color(t.dim).child("Running agents"))
-      .when(live.length === 0, (el) => el.child(div().text_size(11).text_color(t.dim).child("No agents running.")))
-      .children(live.map((a) => this.agentRow(t, a, spaceOf.get(a.labels?.["herdr.space"]))));
+    const helpers = (a) => all.filter((x) => x.state === "live" && x.parent === a.address);
+    const head = (s) => div().pt(4).text_size(11.5).font_medium().text_color(t.dim).child(s);
+    return v_flex().id("orchestra").size_full().min_h(0).bg(t.surface)
+      // Pinned: the main action never scrolls away.
+      .child(v_flex().flex_none().px(12).pt(12).pb(10).gap(8).border_b(1).border_color(t.border)
+        .child(h_flex().justify_between().items_center()
+          .child(div().text_size(14).font_semibold().text_color(t.foreground).child("Orchestra"))
+          .child(div().id("reload-models").text_size(11).text_color(t.dim).hover((s) => s.text_color(t.foreground))
+            .tooltip("Read the model lists again").on_click((_e, cx) => this.loadCatalog(cx)).child("Reload models")))
+        .child(div().id("start-orch").w_full().py(7).rounded(6).flex().justify_center().text_size(12.5).font_medium()
+          .bg(t.solid).text_color(t.solid_foreground).hover((s) => s.opacity(0.9))
+          .tooltip(`Opens a new tab with ${describe(picks.orchestrator)}`)
+          .on_click(() => this.startOrchestrator()).child("Start orchestrator"))
+        .when(Boolean(this.status), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.status))))
+      .child(v_flex().id("orchestra-body").flex_1().min_h(0).p(12).gap(8).overflow_y_scrollbar()
+        .child(head("Roles"))
+        .children(ROLES.map((r) => this.role(t, r, picks[r.id])))
+        .child(head("Running agents"))
+        .when(live.length === 0, (el) => el.child(div().text_size(11).text_color(t.dim).child("No agents running.")))
+        .children(live.map((a) => v_flex().gap(2)
+          .child(this.agentRow(t, a, spaceOf.get(a.labels?.["herdr.space"])))
+          .children(helpers(a).map((h) => this.helperRow(t, h))))));
   }
 }
