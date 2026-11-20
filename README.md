@@ -10,4 +10,3 @@ New machine (needs git and `gh auth login`):
 Sync now: `~/.config/herdr-app/sync.sh`. Log: `~/Library/Logs/herdr-sync.log`.
 If two machines change the same file, sync stops and tells you; fix the file,
 then delete `.git/sync-stopped`.
-edit A
