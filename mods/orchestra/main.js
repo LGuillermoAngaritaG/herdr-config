@@ -6,7 +6,7 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, hc, home, appHome, readTextFile, writeTextFile, theme, run, shared, setShared, terminals, agents, spaces, checking } from "herdr";
+import { exec, hc, home, appHome, readTextFile, writeTextFile, theme, run, shared, setShared, terminals, agents, spaces, checking, nextCommand } from "herdr";
 
 const AGENTS = [
   { id: "claude", label: "Claude Code" },
@@ -207,6 +207,15 @@ export default class Orchestra extends View {
     if (checking()) return;
     this.loadCatalog(cx);
     this.writeTemplates(cx);
+    // orchestra.orchestra / orchestra.council switch the mode; orchestra.open-<role> opens a role's choices.
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = await nextCommand();
+        if (MODES.some((m) => m.id === c)) { setShared("orchestra.mode", c); this.openRole = null; }
+        if (typeof c === "string" && c.startsWith("open-")) this.openRole = c.slice(5) || null;
+        cx.notify();
+      }
+    });
   }
 
   picks() {

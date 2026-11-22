@@ -50,6 +50,8 @@ export default class Limits extends View {
         const c = await nextCommand();
         if (c === "orchestra") toggleOrchestra();
         if (c === "refresh") this.refresh(cx);
+        if (c === "expand") { this.open = new Set(this.tools.map((x) => x.id)); cx.notify(); }
+        if (c === "collapse") { this.open = new Set(); cx.notify(); }
       }
     });
   }
