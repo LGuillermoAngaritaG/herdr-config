@@ -12,6 +12,7 @@ const AGENTS = [
   { id: "claude", label: "Claude Code" },
   { id: "codex", label: "Codex" },
   { id: "antigravity", label: "Antigravity" },
+  { id: "pi", label: "Pi" },
 ];
 
 const ROLES = [
@@ -58,6 +59,8 @@ function argv(pick, role) {
       "--disallowedTools", "Bash(hc exec *)", "Bash(hc file *)"] : [];
     return ["claude", "--model", pick.model, "--effort", pick.effort, ...lock];
   }
+  // Pi has no per-command allowlist: the lead roles only lose its edit and write tools.
+  if (pick.agent === "pi") return ["pi", "--model", pick.model, ...(pick.effort ? ["--thinking", pick.effort] : []), ...(role === "orchestrator" || role === "aggregator" ? ["--tools", "bash"] : [])];
   if (pick.agent === "codex") return ["codex", "--no-daemon", "-m", pick.model, "-c", `model_reasoning_effort="${pick.effort}"`];
   return ["agy", "--model", pick.effort ? `${pick.model}-${pick.effort}` : pick.model];
 }

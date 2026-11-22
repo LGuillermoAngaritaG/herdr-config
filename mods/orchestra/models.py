@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Prints the models and effort levels each agent CLI offers, as JSON:
-{"claude": [{"id", "label", "efforts"}], "codex": [...], "antigravity": [...]}.
+{"claude": [{"id", "label", "efforts"}], "codex": [...], "antigravity": [...], "pi": [...]}.
 Antigravity encodes effort in the model id (gemini-4-neon-high): models are grouped by base id.
 """
 import json
@@ -52,4 +52,22 @@ def antigravity():
     return list(groups.values())
 
 
-print(json.dumps({"claude": CLAUDE, "codex": codex(), "antigravity": antigravity()}))
+PI_EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh"]
+
+
+def pi():
+    """Pi's own local models (Ollama, LM Studio, vLLM), from ~/.pi/agent/models.json, as provider/id."""
+    try:
+        with open(os.path.expanduser("~/.pi/agent/models.json")) as f:
+            providers = json.load(f).get("providers") or {}
+    except (OSError, ValueError):
+        return []
+    return [
+        {"id": f"{name}/{m['id']}", "label": m.get("name") or m["id"], "efforts": PI_EFFORTS if m.get("reasoning") else []}
+        for name, p in providers.items()
+        for m in p.get("models") or []
+        if m.get("id")
+    ]
+
+
+print(json.dumps({"claude": CLAUDE, "codex": codex(), "antigravity": antigravity(), "pi": pi()}))
