@@ -39,9 +39,9 @@
                 "mod": "agents"
               },
               "size": {
-                "weight": 1
+                "weight": 2
               },
-              "min": 90
+              "min": 120
             }
           ]
         },
@@ -49,10 +49,10 @@
           "id": "limits",
           "type": "block",
           "size": {
-            "px": 236
+            "px": 128
           },
           "content": {
-            "mod": "limits"
+            "mod": "limits-c1"
           }
         },
         {
@@ -82,15 +82,36 @@
       "type": "column",
       "children": [
         {
-          "id": "tabs",
-          "type": "block",
-          "content": {
-            "mod": "tabs"
-          },
+          "id": "topbar",
+          "type": "row",
           "size": {
             "px": 42
           },
-          "window_drag": true
+          "resizable": false,
+          "children": [
+            {
+              "id": "tabs",
+              "type": "block",
+              "content": {
+                "mod": "tabs"
+              },
+              "window_drag": true
+            },
+            {
+              "id": "orch-button",
+              "type": "block",
+              "size": {
+                "px": 190
+              },
+              "content": {
+                "mod": "orchestra-c1",
+                "props": {
+                  "button": true
+                }
+              },
+              "window_drag": true
+            }
+          ]
         },
         {
           "id": "work-body",
@@ -146,13 +167,6 @@
                       "content": {
                         "mod": "changes"
                       }
-                    },
-                    {
-                      "id": "orchestra",
-                      "type": "block",
-                      "content": {
-                        "mod": "orchestra"
-                      }
                     }
                   ],
                   "active": "files"
@@ -169,13 +183,14 @@
               "id": "orch",
               "type": "block",
               "content": {
-                "mod": "orchestra"
+                "mod": "orchestra-c1"
               },
               "size": {
-                "px": 368
+                "px": 340
               },
               "min": 280,
-              "max": 900
+              "max": 600,
+              "hidden": true
             }
           ],
           "padding": 8,
