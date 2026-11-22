@@ -207,12 +207,14 @@ export default class Orchestra extends View {
     if (checking()) return;
     this.loadCatalog(cx);
     this.writeTemplates(cx);
-    // orchestra.orchestra / orchestra.council switch the mode; orchestra.open-<role> opens a role's choices.
+    // orchestra.orchestra / orchestra.council switch the mode; orchestra.open-<role> opens a role's choices;
+    // orchestra.start presses the start button.
     cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
         if (MODES.some((m) => m.id === c)) { setShared("orchestra.mode", c); this.openRole = null; }
         if (typeof c === "string" && c.startsWith("open-")) this.openRole = c.slice(5) || null;
+        if (c === "start") this.start();
         cx.notify();
       }
     });
