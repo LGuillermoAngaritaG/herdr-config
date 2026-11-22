@@ -1,6 +1,8 @@
 // Orchestrator, worker and reviewer: pick an agent, a model and an effort for each.
 // Worker and reviewer become hc templates; the orchestrator starts in a new tab, or any
 // running agent can be switched into the orchestrator role.
+// Council mode: an aggregator gives one goal to three members, each picked here, and
+// combines their best answers into one.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -18,10 +20,28 @@ const ROLES = [
   { id: "reviewer", label: "Reviewer", about: "One review of all the work at the end, read-only." },
 ];
 
+const COUNCIL_ROLES = [
+  { id: "aggregator", label: "Aggregator", about: "Gives the goal to the three members, compares their answers, combines the best. Never does the work." },
+  { id: "council1", label: "Member 1", about: "Works on the goal alone, in its own worktree when files change." },
+  { id: "council2", label: "Member 2", about: "Works on the goal alone, in its own worktree when files change." },
+  { id: "council3", label: "Member 3", about: "Works on the goal alone, in its own worktree when files change." },
+];
+const MEMBERS = ["council1", "council2", "council3"];
+const template = (role) => (role.startsWith("council") ? `council-${role.slice(-1)}` : role);
+
+const MODES = [
+  { id: "orchestra", label: "Orchestra", roles: ROLES, lead: "orchestrator", start: "Start orchestrator", tab: "Orchestrator" },
+  { id: "council", label: "Council", roles: COUNCIL_ROLES, lead: "aggregator", start: "Start council", tab: "Council" },
+];
+
 const DEFAULTS = {
   orchestrator: { agent: "antigravity", model: "gemini-4-neon", effort: "high" },
   worker: { agent: "claude", model: "claude-opus-5-5", effort: "high" },
   reviewer: { agent: "codex", model: "gpt-6.2-sol", effort: "high" },
+  aggregator: { agent: "claude", model: "claude-opus-5-5", effort: "high" },
+  council1: { agent: "claude", model: "claude-opus-5-5", effort: "high" },
+  council2: { agent: "codex", model: "gpt-6.2-sol", effort: "high" },
+  council3: { agent: "antigravity", model: "gemini-4-neon", effort: "high" },
 };
 
 const ROLE_LABEL = "herdr.role";
@@ -33,7 +53,7 @@ const MAX_PARALLEL = 3;
 // Codex's read-only sandbox also blocks hc, so Codex and Antigravity are held back by the brief only.
 function argv(pick, role) {
   if (pick.agent === "claude") {
-    const lock = role === "orchestrator" ? ["--permission-mode", "manual", "--tools", "Bash", "--allowedTools", "Bash(hc *)", "Bash(git worktree *)", "Bash(git -C * worktree *)", "Bash(printenv HC_TERMINAL_ID)",
+    const lock = role === "orchestrator" || role === "aggregator" ? ["--permission-mode", "manual", "--tools", "Bash", "--allowedTools", "Bash(hc *)", "Bash(git worktree *)", "Bash(git -C * worktree *)", "Bash(printenv HC_TERMINAL_ID)",
       // hc exec and hc file run any command or edit any file: they would go around the lock.
       "--disallowedTools", "Bash(hc exec *)", "Bash(hc file *)"] : [];
     return ["claude", "--model", pick.model, "--effort", pick.effort, ...lock];
@@ -61,6 +81,14 @@ Check the actual results (the changed files, git diff, outputs), not only the re
 Look for bugs, missing tests, conflicts between workers' changes, and anything that does not match the goal.
 Report one review covering all tasks: findings ranked by severity per task, each with your advice (fix it, or fine to leave and why), or say it all looks good. Send it with: hc send <orchestrator address> "<review>".
 The task names the orchestrator's address.`,
+  councillor: `You are one of three council members started by an aggregator agent. The other two get the same goal; you work alone and do not see their work.
+Do your best complete answer to the goal: the solution, the plan or the document it asks for. Do not start other agents.
+Work only in the folder you start in. If the goal names a git worktree, commit your changes on its branch before you report, and name the branch.
+Run the relevant tests when you change code.
+When you finish or get stuck, report to the aggregator with: hc send <its address> "<report>".
+The report has: your answer (or where it is: branch, file), the main choices you made and why, what you tested, and what is weak or uncertain. The aggregator compares it with the others.
+Later the aggregator may ask you to take parts of the other members' work into yours, or to check the combined result: do just that and report the same way.
+The goal names the aggregator's address.`,
 };
 
 function orchestratorBrief(picks) {
@@ -123,7 +151,51 @@ Run hc --skill once if you need the full hc manual.
 Now ask the user for the goal, unless they already gave it.`;
 }
 
-const STOP_BRIEF = `You are no longer the orchestrator. Do not start new helpers. Tell the user which helpers are still running (hc ls) and ask whether to stop them. Then run: hc label "$HC_TERMINAL_ID" ${ROLE_LABEL}=`;
+function councilBrief(picks) {
+  return `You are now the AGGREGATOR of a council. Three members work on the same goal on their own; you compare their answers and combine the best into one. You never do the work.
+
+Hard rules:
+- Never do the work yourself: do not edit, create or delete files, do not write code, do not run builds or tests, do not read through the code to solve things.
+- The only commands you run are hc commands and git worktree commands.
+- Do not use your own built-in subagents or tools to do work. Use only the members below, started with hc.
+
+First run these two commands, one at a time: printenv HC_TERMINAL_ID   (that is your address), then: hc label <your address> ${ROLE_LABEL}=aggregator
+
+Members (always all three, always --bg):
+${MEMBERS.map((m, i) => `- member ${i + 1} (${describe(picks[m])}): hc run --bg --rm --name c${i + 1}-<goal slug> --cwd <folder> ${template(m)} "<goal brief>"`).join("\n")}
+
+The goal brief is the same for all three, each line on its own:
+  Goal: <what the user wants, with everything they told you>
+  Done when: <what a complete answer looks like>
+  Read first: <files or docs, if any>
+  Do not: <what is out of scope; never deploy, publish or merge into the user's branch>
+  Folder: <the member's folder, see below>
+  Aggregator address: <your address>
+
+Folders:
+- The goal changes files in a git repo: each member gets its own worktree from the current branch:
+    git -C <repo> worktree add ~/.herdr/worktrees/<repo name>/<goal slug>-c<n> -b council/<goal slug>-c<n>
+  and its brief says: "You work in a git worktree on branch council/<goal slug>-c<n>. Commit there."
+- A plan, a document or an answer that is not code: each member works in <repo or the user's folder> and writes its answer into its own folder ~/.herdr/council/<goal slug>/c<n>, which its brief tells it to create.
+- A question about a repo that changes nothing: all three read <repo> directly.
+
+How to work:
+1. Get the goal from the user, unless they already gave it. If it is unclear, ask once; otherwise start right away.
+2. Start the three members in parallel. Right after, check each once with hc read <name>; if one asks to trust the folder or a similar start-up question, answer it (hc keys <name> enter).
+3. Wait with hc wait --children any until all three have reported. Never sleep or poll. Reports arrive as <hc from=...> messages.
+4. Compare the three yourself. Never ask the user to compare or choose. For each answer note what is strong, what is wrong or missing. Pick the best one as the base and list the parts worth taking from the other two. Where they disagree, decide and keep the reason.
+5. If files changed: ask the base member (hc send) to take those parts into its branch (it can read the other branches by name) and report. Close the other two members as soon as you no longer need them (hc kill <name>).
+   If nothing changed in files: you write the combined answer yourself from the reports; that is your job, not work.
+6. Ask one of the other members, before you close it, to check the combined result against the goal and report real problems only. Fix real problems once, through the base member.
+7. Answer the user: the combined answer itself (the plan, the document, or the branch council/<goal slug>-c<n> to review and merge), what came from which member, where they disagreed and what you chose, and what is still open.
+8. Ask the user only for what is theirs to decide: an action they have not approved that is hard to undo or reaches outside this machine (deploy, publish, merge into their branch, spend money, delete data), or a choice between product directions.
+9. After you answer, keep only the base member open for follow-ups; close the rest. When the goal is finished completely (the user says so, or gives a new goal), close every member (hc kill <name>), check with hc ls that none of yours is left, and remove the worktrees of the members that were not the base (git -C <repo> worktree remove <path>). Keep the branches.
+Run hc --skill once if you need the full hc manual.
+
+Now ask the user for the goal, unless they already gave it.`;
+}
+
+const STOP_BRIEF = `You are no longer the orchestrator or aggregator. Do not start new helpers. Tell the user which helpers are still running (hc ls) and ask whether to stop them. Then run: hc label "$HC_TERMINAL_ID" ${ROLE_LABEL}=`;
 
 export default class Orchestra extends View {
   init(_props, cx) {
@@ -182,9 +254,11 @@ export default class Orchestra extends View {
       const dir = `${home()}/.config/herdr-core/templates`;
       try {
         await exec("mkdir", ["-p", dir]);
-        for (const role of ["worker", "reviewer"]) {
-          const path = `${dir}/${role}.md`;
-          const text = `---\nname: ${role}\ndescription: ${role === "worker" ? "Does one task" : "Reviews all the work at the end"} (${describe(picks[role])}), set in Herdr's Orchestra panel\ncommand: ${argv(picks[role], role).map((a) => (/^[\w.\-=/]+$/.test(a) ? a : `'${a}'`)).join(" ")}\n---\n${TEMPLATE_BODY[role]}\n`;
+        for (const role of ["worker", "reviewer", ...MEMBERS]) {
+          const name = template(role);
+          const path = `${dir}/${name}.md`;
+          const about = { worker: "Does one task", reviewer: "Reviews all the work at the end" }[role] ?? `Council member ${role.slice(-1)}`;
+          const text = `---\nname: ${name}\ndescription: ${about} (${describe(picks[role])}), set in Herdr's Orchestra panel\ncommand: ${argv(picks[role], role).map((a) => (/^[\w.\-=/]+$/.test(a) ? a : `'${a}'`)).join(" ")}\n---\n${TEMPLATE_BODY[MEMBERS.includes(role) ? "councillor" : role]}\n`;
           const old = await readTextFile(path);
           if (old !== text) await writeTextFile(path, text, old);
         }
@@ -196,19 +270,30 @@ export default class Orchestra extends View {
     });
   }
 
-  startOrchestrator() {
+  mode() {
+    return MODES.find((m) => m.id === shared("orchestra.mode")) ?? MODES[0];
+  }
+
+  brief(mode, picks) {
+    return mode.id === "council" ? councilBrief(picks) : orchestratorBrief(picks);
+  }
+
+  start() {
     const picks = this.picks();
+    const mode = this.mode();
+    const lead = picks[mode.lead];
     // The brief goes on the command line: Antigravity only takes a first prompt with -i.
-    const brief = orchestratorBrief(picks);
+    const brief = this.brief(mode, picks);
     // Claude reads words after --allowedTools as more tools: the brief goes after --.
-    const first = { antigravity: ["-i", brief], claude: ["--", brief] }[picks.orchestrator.agent] ?? [brief];
-    run("tab.new", { name: "Orchestrator", argv: [...argv(picks.orchestrator, "orchestrator"), ...first] });
+    const first = { antigravity: ["-i", brief], claude: ["--", brief] }[lead.agent] ?? [brief];
+    run("tab.new", { name: mode.tab, argv: [...argv(lead, mode.lead), ...first] });
   }
 
   toggle(t, on, cx) {
     cx.spawn(async (cx) => {
-      const r = await hc(["send", t.address, on ? orchestratorBrief(this.picks()) : STOP_BRIEF]);
-      if (r.code === 0) await hc(["label", t.address, `${ROLE_LABEL}=${on ? "orchestrator" : ""}`]);
+      const mode = this.mode();
+      const r = await hc(["send", t.address, on ? this.brief(mode, this.picks()) : STOP_BRIEF]);
+      if (r.code === 0) await hc(["label", t.address, `${ROLE_LABEL}=${on ? mode.lead : ""}`]);
       this.status = r.code ? `Could not reach ${t.address}: ${r.stderr.trim()}` : null;
       cx.notify();
     });
@@ -228,7 +313,7 @@ export default class Orchestra extends View {
     const models = this.modelsWithPick(pick);
     const efforts = models.find((m) => m.id === pick.model)?.efforts ?? [];
     const label = (s) => div().text_size(10.5).text_color(t.dim).child(s);
-    const promptOnly = role.id === "orchestrator" && pick.agent !== "claude";
+    const promptOnly = (role.id === "orchestrator" || role.id === "aggregator") && pick.agent !== "claude";
     return v_flex().gap(6).rounded(8).bg(t.background).border(1).border_color(open ? t.accent : t.border)
       .child(h_flex().id(`role-${role.id}`).px(10).py(8).gap(8).items_center().rounded(8).cursor_pointer().hover((s) => s.bg(t.hover))
         .tooltip(open ? "Close" : role.about)
@@ -264,8 +349,8 @@ export default class Orchestra extends View {
     return info?.title?.trim() || a.address;
   }
 
-  agentRow(t, a, spaceName) {
-    const on = a.labels?.[ROLE_LABEL] === "orchestrator";
+  agentRow(t, a, spaceName, mode) {
+    const on = a.labels?.[ROLE_LABEL] === mode.lead;
     return h_flex().id(`orch-${a.address}`).px(8).h(30).gap(8).items_center().rounded(6).hover((s) => s.bg(t.hover))
       .child(this.dot(t, a.status))
       .child(div().id(`focus-${a.address}`).flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).cursor_pointer()
@@ -275,7 +360,7 @@ export default class Orchestra extends View {
         .child(`${a.program?.name ?? ""}${spaceName ? ` · ${spaceName}` : ""}`))
       .child(div().id(`switch-${a.address}`).w(30).h(16).rounded(8).p(2).flex().bg(on ? t.accent : t.border)
         .when(on, (el) => el.justify_end())
-        .tooltip(on ? "Stop being the orchestrator" : "Make this agent the orchestrator (held back by its instructions only: it keeps its edit tools)")
+        .tooltip(on ? `Stop being the ${mode.lead}` : `Make this agent the ${mode.lead} (held back by its instructions only: it keeps its edit tools)`)
         .on_click((_e, cx) => this.toggle(a, !on, cx))
         .child(div().size(12).rounded(6).bg(on ? t.accent_foreground : t.muted)));
   }
@@ -300,7 +385,8 @@ export default class Orchestra extends View {
     const helpers = (a) => all.filter((x) => x.state === "live" && x.parent === a.address);
     const head = (s) => div().pt(4).text_size(11.5).font_medium().text_color(t.dim).child(s);
     // Orchestrators and their helpers that wait for the person; a click shows the first one.
-    const orchs = live.filter((a) => a.labels?.[ROLE_LABEL] === "orchestrator");
+    const mode = this.mode();
+    const orchs = live.filter((a) => MODES.some((m) => a.labels?.[ROLE_LABEL] === m.lead));
     const blocked = [...orchs, ...orchs.flatMap(helpers)].filter((x) => x.status === "blocked");
     return v_flex().id("orchestra").size_full().min_h(0).bg(t.surface)
       // Pinned: the main action never scrolls away.
@@ -315,18 +401,26 @@ export default class Orchestra extends View {
               .child(`${blocked.length} need${blocked.length === 1 ? "s" : ""} you`))))
           .child(div().id("reload-models").text_size(11).text_color(t.dim).hover((s) => s.text_color(t.foreground))
             .tooltip("Read the model lists again").on_click((_e, cx) => this.loadCatalog(cx)).child("Reload models")))
+        // Which mode the start button, the roles and the switches below use.
+        .child(h_flex().p(2).gap(2).rounded(7).bg(t.background).border(1).border_color(t.border)
+          .children(MODES.map((m) => div().id(`mode-${m.id}`).flex_1().py(4).rounded(5).flex().justify_center().text_size(12)
+            .bg(m.id === mode.id ? t.selected : t.background).text_color(m.id === mode.id ? t.foreground : t.muted)
+            .cursor_pointer().hover((s) => s.text_color(t.foreground))
+            .tooltip(m.id === "council" ? "Three agents work on the same goal; an aggregator combines the best answers" : "An orchestrator splits the goal between workers, and one reviewer checks it")
+            .on_click((_e, cx) => { setShared("orchestra.mode", m.id); this.openRole = null; cx.notify(); })
+            .child(m.label))))
         .child(div().id("start-orch").w_full().py(7).rounded(6).flex().justify_center().text_size(12.5).font_medium()
           .bg(t.solid).text_color(t.solid_foreground).hover((s) => s.opacity(0.9))
-          .tooltip(`Opens a new tab with ${describe(picks.orchestrator)}`)
-          .on_click(() => this.startOrchestrator()).child("Start orchestrator"))
+          .tooltip(`Opens a new tab with ${describe(picks[mode.lead])}`)
+          .on_click(() => this.start()).child(mode.start))
         .when(Boolean(this.status), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.status))))
       .child(v_flex().id("orchestra-body").flex_1().min_h(0).p(12).gap(8).overflow_y_scrollbar()
         .child(head("Roles"))
-        .children(ROLES.map((r) => this.role(t, r, picks[r.id])))
+        .children(mode.roles.map((r) => this.role(t, r, picks[r.id])))
         .child(head("Running agents"))
         .when(live.length === 0, (el) => el.child(div().text_size(11).text_color(t.dim).child("No agents running.")))
         .children(live.map((a) => v_flex().gap(2)
-          .child(this.agentRow(t, a, spaceOf.get(a.labels?.["herdr.space"])))
+          .child(this.agentRow(t, a, spaceOf.get(a.labels?.["herdr.space"]), mode))
           .children(helpers(a).map((h) => this.helperRow(t, h))))));
   }
 }
