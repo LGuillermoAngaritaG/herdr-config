@@ -52,11 +52,11 @@
         {
           "id": "limits",
           "type": "block",
-          "size": {
-            "px": 136
-          },
           "content": {
             "mod": "limits"
+          },
+          "size": {
+            "px": 136
           }
         },
         {
@@ -88,10 +88,6 @@
         {
           "id": "topbar",
           "type": "row",
-          "size": {
-            "px": 42
-          },
-          "resizable": false,
           "children": [
             {
               "id": "tabs",
@@ -104,18 +100,22 @@
             {
               "id": "orch-button",
               "type": "block",
-              "size": {
-                "px": 196
-              },
               "content": {
-                "mod": "orchestra",
+                "mod": "orchestra-lite",
                 "props": {
                   "button": true
                 }
               },
+              "size": {
+                "px": 150
+              },
               "window_drag": true
             }
-          ]
+          ],
+          "size": {
+            "px": 42
+          },
+          "resizable": false
         },
         {
           "id": "work-body",
@@ -187,14 +187,14 @@
               "id": "orch",
               "type": "block",
               "content": {
-                "mod": "orchestra"
+                "mod": "orchestra-lite"
               },
               "size": {
                 "px": 320
               },
               "min": 280,
               "max": 600,
-              "hidden": true
+              "hidden": false
             }
           ],
           "padding": 8,
